@@ -11,6 +11,15 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 import os
 import logging
+from fastapi import Response
+
+async def db_session_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        response = Response("Internal server error", status_code=500)
+    return response
+ 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
