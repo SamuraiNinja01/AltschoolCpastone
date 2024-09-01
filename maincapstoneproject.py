@@ -13,16 +13,7 @@ import os
 import logging
 from fastapi import Response
 
-@app.get("/")
-async def read_root():
-    return {"message": "Welcome to the Movie Listing API!"}
 
-async def db_session_middleware(request: Request, call_next):
-    try:
-        response = await call_next(request)
-    except Exception as e:
-        response = Response("Internal server error", status_code=500)
-    return response
  
 
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +66,17 @@ class Comment(Base):
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the Movie Listing API!"}
+
+async def db_session_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        response = Response("Internal server error", status_code=500)
+    return response
 
 @app.middleware("http")
 async def db_session_middleware(request: Request, call_next):
