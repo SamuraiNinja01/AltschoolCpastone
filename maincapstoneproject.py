@@ -13,6 +13,10 @@ import os
 import logging
 from fastapi import Response
 
+@app.get("/")
+async def read_root():
+    return {"message": "Welcome to the Movie Listing API!"}
+
 async def db_session_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
