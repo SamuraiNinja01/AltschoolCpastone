@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
 from fastapi.requests import Request
 from pydantic import BaseModel
@@ -9,12 +9,8 @@ from sqlalchemy.orm import sessionmaker, Session, relationship
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-import os
 import logging
 from fastapi import Response
-
-
- 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,7 +20,8 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "your_secret_key")
+# Setting the SECRET_KEY to the desired value
+SECRET_KEY = "Heritage1234#"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -34,34 +31,34 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True)
-    password = Column(String)
+    username = Column(String, unique=True, nullable=False)
+    password = Column(String, nullable=False)
 
 class Movie(Base):
     __tablename__ = "movies"
     id = Column(Integer, primary_key=True)
-    title = Column(String)
-    description = Column(String)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    title = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", backref="movies")
 
 class Rating(Base):
     __tablename__ = "ratings"
     id = Column(Integer, primary_key=True)
-    movie_id = Column(Integer, ForeignKey("movies.id"))
+    movie_id = Column(Integer, ForeignKey("movies.id"), nullable=False)
     movie = relationship("Movie", backref="ratings")
-    rating = Column(Float)
+    rating = Column(Float, nullable=False)
 
 class Comment(Base):
     __tablename__ = "comments"
     id = Column(Integer, primary_key=True)
-    movie_id = Column(Integer, ForeignKey("movies.id"))
+    movie_id = Column(Integer, ForeignKey("movies.id"), nullable=False)
     movie = relationship("Movie", backref="comments")
-    text = Column(String)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    text = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", backref="comments")
-    parent_id = Column(Integer, ForeignKey("comments.id"))
-    parent = relationship("Comment", backref="replies")
+    parent_id = Column(Integer, ForeignKey("comments.id"), nullable=True)
+    parent = relationship("Comment", backref="replies", remote_side=[id])
 
 Base.metadata.create_all(bind=engine)
 
@@ -71,19 +68,14 @@ app = FastAPI()
 async def read_root():
     return {"message": "Welcome to the Movie Listing API!"}
 
-async def db_session_middleware(request: Request, call_next):
-    try:
-        response = await call_next(request)
-    except Exception as e:
-        response = Response("Internal server error", status_code=500)
-    return response
-
 @app.middleware("http")
 async def db_session_middleware(request: Request, call_next):
-    response = Response("Internal server error", status_code=500)
     try:
         request.state.db = SessionLocal()
         response = await call_next(request)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        response = Response("Internal server error", status_code=500)
     finally:
         request.state.db.close()
     return response
@@ -127,14 +119,21 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
 @app.post("/register")
 async def register_user(username: str, password: str, db: Session = Depends(get_db)):
-    user = db.query(User).filter_by(username=username).first()
-    if user is not None:
-        raise HTTPException(status_code=400, detail="Username already taken")
-    hashed_password = get_password_hash(password)
-    user = User(username=username, password=hashed_password)
-    db.add(user)
-    db.commit()
-    return {"message": "User created successfully"}
+    try:
+        user = db.query(User).filter_by(username=username).first()
+        if user is not None:
+            raise HTTPException(status_code=400, detail="Username already taken")
+        hashed_password = get_password_hash(password)
+        new_user = User(username=username, password=hashed_password)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        return {"message": "User created successfully", "username": new_user.username}
+    
+    except Exception as e:
+        db.rollback()  # rollback in case of an error
+        logger.error(f"Error during user registration: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @app.post("/token")
 async def login_for_access_token(username: str, password: str, db: Session = Depends(get_db)):
@@ -155,6 +154,7 @@ async def create_movie(title: str, description: str, user: User = Depends(get_cu
     movie = Movie(title=title, description=description, user_id=user.id)
     db.add(movie)
     db.commit()
+    db.refresh(movie)
     return {"id": movie.id, "title": movie.title, "description": movie.description}
 
 @app.get("/movies/{movie_id}")
